@@ -1,5 +1,11 @@
-#script to do the gis analysis to look at mean bii and mean biomass in 
-#different ecoregions as well as overlap beween ecoregions and hotspots
+########################################################################
+#this script calculates the mean bii, biomass, and human footprint of###
+#different ecoregions as well as the overlap between ecoregions and#####
+#hotspots###############################################################
+########################################################################
+
+
+rm(list = ls())
 
 #load packages to be used
 library(raster)
@@ -14,17 +20,20 @@ library(spatialEco)
 library(rgdal)
 library(cowplot)
 library(reshape2)
+library(dplyr)
 
 #load in ecoregion  dataset
-eco_regions <- readOGR(dsn = "data", layer = "Ecoregions2017")
+eco_regions <- readOGR(dsn = "data/ecoregions/", layer = "Ecoregions2017")
 #load in hotspots dataset
-hotspots <- shapefile("data/hotspots_unzipped/commondata/data0/hotspots_revisited_2004_polygons.shp")
+hotspots <- shapefile("data/hotspots/hotspots_revisited_2004_polygons.shp")
 #load in coastline dataset
 coast<-readOGR("data",layer="ne_10m_coastline")
-#load in bii dataset
-bii_corr<-raster("data/BII_corrected.tif")
+#load in BII map data
+BII_map<-raster("data/lbii.asc")
 #load in biomass dataset
 biomass_corr<-raster("data/biomass_corrected.tif")
+#load in human footprint data
+hfp<-raster("data/HumanFootprintv2/Dryadv3/Maps/HFP2009.tif")
 
 #subset hotspot data to only include extent
 hotspots <- hotspots[hotspots$TYPE=="hotspot_area",]
@@ -47,56 +56,80 @@ for (i in 1:length(ecoregions_unique)){
 
 write.csv(ecoregion_overlap,file="data/ecoregion_overlap.csv")
 
+
 #attach this data to the ecoregion shapefile data
 eco_regions2<-merge(eco_regions,ecoregion_overlap,by="ECO_NAME",all=T)
 
+########################################################################
+#2 - Extract data from BII, biomass, and human footprint rasters to ####
+#using shapefile of ecoregions##########################################
+########################################################################
+
+#aggregate the BII map to a coarser resolution and project
+BII_agg<-aggregate(BII_map, fact=10, fun=mean, expand=TRUE)
+proj4string(BII_agg) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
 #extract information on BII values in each ecoregion
-bii_ecoregions<-extract(bii_corr,eco_regions,fun=mean,na.rm=TRUE)
+bii_ecoregions<-extract(BII_agg,eco_regions,fun=mean,na.rm=TRUE)
 #extract information on biomass values in each ecoregion
 biomass_ecoregions<-extract(biomass_corr,eco_regions,fun=mean,na.rm=TRUE)
+#extract information on human footprint in each ecoregion
+hf_ecoregions<-extract(hfp,eco_regions,fun=mean,na.rm=TRUE)
+
 
 #remove nas
 eco_regions2@data$hotspot_area2<-ifelse(is.na(eco_regions2@data$hotspot_area),0,eco_regions2@data$hotspot_area)
 #put all this in a dataframe
-hotspot_overlap_df<-data.frame(ECO_NAME=eco_regions2@data$ECO_NAME,hotspot_area=eco_regions2@data$hotspot_area2,bii=bii_ecoregions,biomass=biomass_ecoregions)
+hotspot_overlap_df<-data.frame(ECO_NAME=eco_regions2@data$ECO_NAME,hotspot_area=eco_regions2@data$hotspot_area2,bii=bii_ecoregions,biomass=biomass_ecoregions,hf=hf_ecoregions)
 hotspot_overlap_df$hotspot<-ifelse(hotspot_overlap_df$hotspot_area>=50,"hotspot","not hotspot")
-
-
+#save dataframe to csv
 write.csv(hotspot_overlap_df,"data/hotspot_overlap.csv")
+
+#get statistics for hotspots
+#get mean bii and biomass for each hotspot
+hotspot_biomass<-extract(biomass_corr,hotspots,fun=mean,na.rm=TRUE)
+hotspot_bii<-extract(bii_corr,hotspots,fun=mean,na.rm=TRUE)
+#check the different that using the uncorrected version of bii makes
+hotspot_bii_unc<-extract(BII_agg,hotspots,fun=mean,na.rm=TRUE)
+
+
+hotspot_stats<-data.frame(hotspot_name=hotspots@data$NAME,biomass=hotspot_biomass,bii=hotspot_bii,bii_unc=hotspot_bii_unc)
+ggplot(hotspot_stats,aes(x=hotspot_bii,y=hotspot_bii_unc))+geom_point()+geom_abline(lty=2)
+write.csv(hotspot_stats,"data/hotspot_stats.csv")
+
 #plot some exploratory plots
 
 
 median(hotspot_overlap_df$bii,na.rm=T)
 median(hotspot_overlap_df$biomass,na.rm=T)
+quantile(hotspot_overlap_df$biomass,na.rm=T)
+quantile(hotspot_overlap_df$bii,probs=0.25,na.rm=T)
 
 
-#plot data on bii vs biomass
-hot_plot1<-ggplot(hotspot_overlap_df,aes(x=biomass,y=bii,colour=hotspot))+geom_hline(yintercept = 0.885,lty=2)+geom_vline(xintercept = 0.508,lty=2)+geom_point(shape=1)
-hot_plot2<-hot_plot1+scale_color_manual("",values=c("hotspot"="red","not hotspot"="grey"))+ylab("biodiversity intactness index")+xlab("biomass intactness")
+#plot alternative version with line of unity and mean values for hotspots and non-hotspots
 
-hot_plot1_v2<-ggplot(hotspot_overlap_df,aes(x=biomass,y=bii,colour=hotspot))+geom_point(shape=1)+geom_abline()+coord_cartesian(xlim=c(0,1),ylim=c(0,1),expand = T)
-hot_plot2_v2<-hot_plot1_v2+scale_color_manual("",values=c("hotspot"="red","not hotspot"="grey"))+ylab("biodiversity intactness index")+xlab("biomass intactness")
-
-
-save_plot(hot_plot2,filename = "figures/ecoregion_scatter.png",base_aspect_ratio = 1.5)
+#first calculate the median and interquartile ranges
+hotspot_median<-ddply(hotspot_overlap_df,.(hotspot),summarize,m_bii=median(bii,na.rm=T),m_biomass=median(biomass,na.rm=T),
+                      biom_25=quantile(biomass,probs=0.25,na.rm=T),biom_75=quantile(biomass,probs=0.75,na.rm=T),
+                      bii_25=quantile(bii,probs=0.25,na.rm=T),bii_75=quantile(bii,probs=0.75,na.rm=T))
 
 
-#plot the same kind of data as a violin plot
-head(hotspot_overlap_df)
-hotspot_melt<-melt(hotspot_overlap_df,id.vars = .("ECO_NAME","hotspot_area","hotspot"))
-summary(hotspot_melt)
-hot_violin1<-ggplot(hotspot_melt,aes(x=variable,y=value,fill=hotspot),colour="black")+geom_violin(draw_quantiles = c(0.5),trim = T)
-hot_violin2<-hot_violin1+scale_fill_manual("",values=c("hotspot"="red","not hotspot"="grey"))+ylab("index value")
-save_plot(hot_violin2,filename = "figures/ecoregion_violin.png",base_aspect_ratio = 1.5)
+hot_plot1_v2<-ggplot(hotspot_overlap_df,aes(x=biomass,y=bii,colour=hotspot))+geom_point(shape=16,alpha=0.4)+geom_abline(lty=2)+coord_cartesian(xlim=c(0,1.1),ylim=c(0,1.1),expand = F)
+hot_plot2_v2<-hot_plot1_v2+scale_color_manual("",values=c("hotspot"="red","not hotspot"="dark grey"))+ylab("biodiversity intactness index")+xlab("biomass intactness")
+hot_plot3_v2<-hot_plot2_v2+geom_point(data=hotspot_median,aes(x=m_biomass,y=m_bii,colour=hotspot),shape=15,size=2,stroke=1)+ theme(legend.position="none")
+hot_plot4_v2<-hot_plot3_v2+geom_errorbarh(data=hotspot_median,aes(x=m_biomass,y=m_bii,xmin=biom_25,xmax=biom_75,colour=hotspot),size=0.5,height=0.005)+
+  geom_errorbar(data=hotspot_median,aes(x=m_biomass,y=m_bii,ymin=bii_25,ymax=bii_75,colour=hotspot),size=0.5,width=0.005)
+save_plot(hot_plot4_v2,filename = "figures/ecoregion_scatter_line_2.png",base_aspect_ratio = 1.2,dpi=600)
 
-#boxplot
-hot_box1<-ggplot(hotspot_melt,aes(x=variable,y=value,fill=hotspot),colour="black")+geom_boxplot(notch = TRUE,position = position_dodge(1))
-hot_box2<-hot_box1+scale_fill_manual("",values=c("hotspot"="red","not hotspot"="grey"))+ylab("index value")
-save_plot(hot_box2,filename = "figures/ecoregion_boxplot.png",base_aspect_ratio = 1.5)
 
-#the same but as a dotplot
-summary(hotspot_melt)
-hot_dot1<-ggplot(hotspot_melt,aes(x=variable,y=value,colour=hotspot,fill=hotspot,group=interaction(variable, hotspot)))+geom_dotplot(shape=1,alpha=0.5,dotsize = 0.5,stackdir = "center",binaxis = "y",position="dodge")
-hot_dot2<-hot_dot1+scale_fill_manual("",values=c("hotspot"="red","not hotspot"="grey"))+ylab("index value")+scale_colour_manual("",values=c("hotspot"="red","not hotspot"="grey"))
+#plot hf vs bii for ecoregions
+hf_bii_plot1<-ggplot(hotspot_overlap_df,aes(x=hf,y=bii,colour=hotspot))+geom_point(shape=1,alpha=0.8)
+hf_bii_plot2<-hf_bii_plot1+scale_color_manual("",values=c("hotspot"="red","not hotspot"="dark grey"))+ylab("biodiversity intactness index")+xlab("human footprint")
+hf_bii_plot3<-hf_bii_plot2+theme(legend.position="none")
+save_plot(hf_bii_plot3,filename = "figures/hf_bii_scatter.png",base_aspect_ratio = 1.2,dpi=600)
 
-save_plot(hot_dot2,filename = "figures/ecoregion_dotplot.png",base_aspect_ratio = 4)
+#plot hf vs biomass for ecoregions
+hf_bmi_plot1<-ggplot(hotspot_overlap_df,aes(x=hf,y=biomass,colour=hotspot))+geom_point(shape=1,alpha=0.8)
+hf_bmi_plot2<-hf_bmi_plot1+scale_color_manual("",values=c("hotspot"="red","not hotspot"="dark grey"))+ylab("biomass intactness")+xlab("human footprint")
+hf_bmi_plot3<-hf_bmi_plot2+theme(legend.position="none")
+save_plot(hf_bmi_plot3,filename = "figures/hf_bmi_scatter.png",base_aspect_ratio = 1.2,dpi=600)
