@@ -13,17 +13,6 @@ library(cowplot)
 library(viridis)
 
 
-#create a grid
-r <- raster(extent(matrix( c(-180, -90, 180,  90), nrow=2)), nrow=1800, ncol=3600, 
-            crs = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")            
-r[] <- 1:ncell(r)
-sp.r <- as(r, "SpatialPixelsDataFrame")
-summary(sp.r)
-
-sp.r_sub<-subset(sp.r,layer<100)
-
-plot(sp.r_sub)
-
 #load in raster datasets
 
 #load in BII map data
