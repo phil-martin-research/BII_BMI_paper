@@ -47,7 +47,6 @@ col_func <- function(x, y, hue1 = 0.3, hue2 = 0.8, light_grey = 0, dark_grey = 1
 library(raster)
 library(rgdal)
 library(ggplot2)
-library(raster)
 library(maps)
 library(sp)
 library(colorplaner)
@@ -63,23 +62,38 @@ library(viridis)
 #load in ecoregion  dataset
 eco_regions <- readOGR(dsn = "data/ecoregions", layer = "Ecoregions2017")
 #load in coastline dataset
-coast<-readOGR("data/coastline/",layer="ne_10m_coastline")
+coast<-readOGR("data/coastline/",layer="data/coastline/ne_10m_coastline.shp")
 #fortify coastline shapefile for plotting in ggplot
 coast@data$id<-rownames(coast@data)
 coast.points<-fortify(coast,region="id")
 #load in BII map data
-BII_map<-raster("data/bii/lbii.asc")
+BII_map<-raster("data/bii/lbii.asc.ovr")
 #load in biomass map
 biomass<-raster("data/biomass_intactness/C_reduction_perc.tif")
 #load in human footprint index
 hfp<-raster("data/HumanFootprintv2/Dryadv3/Maps/HFP2009.tif")
 #load in nightlights, pasture, croplands, and human population density data
-pop<-raster("data/HumanFootprintv2/Dryadv3/Maps/Popdensity2010.tif")
-lights<-raster("data/HumanFootprintv2/Dryadv3/Maps/Lights2009.tif")
-pasture<-raster("data/HumanFootprintv2/Dryadv3/Maps/Pasture2009.tif")
-croplands<-raster("data/HumanFootprintv2/Dryadv3/Maps/croplands2005.tif")
+pop<-raster("data/population_density/gpw_v4_population_density_rev10_2010_2pt5_min.tif")
+lights<-raster("data/lights/F182013.v4c_web.stable_lights.avg_vis.tif")
+pasture<-raster("data/agriculture/pasture.tif")
+croplands<-raster("data/agriculture/cropland.tif")
+
+#project crops and pastures
+croplandsll<- projectRaster(croplands, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",res=res(BII_map))
+pasturell<- projectRaster(pasture, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",res=res(BII_map))
+agriculturell<-croplandsll+pasturell
+
+plot(agriculturell)
+
+
+# create forest map - no longer used
+r=raster(nrow=90*2,ncol=180*2)
+forestmap=rasterize(ESA[,1:2],r,field=ESA$share.FOREST)
+plot(forestmap)
+
 
 #aggregate the BII map to a coarser resolution and project
+plot(BII_map)
 BII_agg<-aggregate(BII_map, fact=10, fun=mean, expand=TRUE)
 proj4string(BII_agg) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 BII_agg_corr<-BII_agg
@@ -92,11 +106,13 @@ values(biomass)[values(biomass) <0] = NA
 values(biomass)[values(biomass) >=1] = NA
 #set biomass extent and projection to be the sames as that for the BII_agg map
 proj4string(biomass) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-biomass<-crop(biomass,BII_agg_corr)
+biomass<-crop(biomass,BII_map)
 #invert values for raster so that biomass raster represents the intactness of biomass rather than it's loss
 biomass_inv<-raster.invert(biomass)
 #save this altered version of the biomass map
 writeRaster(biomass_inv, "data/biomass_intactness/biomass_corrected", format = "GTiff",overwrite=T)
+
+plot(biomass)
 
 #clean up hfp data and reproject
 hfp_coord<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
@@ -109,17 +125,53 @@ r <- raster(extent(matrix( c(-180, -90, 180,  90), nrow=2)), nrow=1800, ncol=360
 r[] <- 1:ncell(r)
 sp.r <- as(r, "SpatialPixelsDataFrame")
 
+
+
 #extract values from biomass raster
 sp.r$biomass<-(extract(biomass_inv,sp.r))
 #extract values from BII data
 sp.r$bii<-(extract(BII_agg_corr,sp.r))
 #extract hfp values to grid
 sp.r$hfp<-(extract(projected_hfp,sp.r))
-
+#extract croplands to grid
+sp.r$crops<-(extract(croplandsll_agg,sp.r))
+#extract pastures to grid
+sp.r$agriculture<-(extract(agriculture_agg,sp.r))
+# extract forest to grid
+sp.r$forest<-(extract(forestmap,sp.r))
 #convert grid to a dataframe for plotting in  ggplot
 spr_df<-as.data.frame(sp.r)
 #save this data as a csv file
 write.csv(spr_df,"data/BII_HF_BMI.csv")
+
+
+
+### STATS
+
+indexcrops=which(spr_df$crops>0)
+indexpasture=which(spr_df$pastures>0)
+indexforest=which(spr_df$forest>0.5)
+# overall anti-correlated
+cor.test(as.numeric(spr_df$bii),as.numeric(spr_df$biomass),method='pearson') #-0.16
+
+# more anti-correlated in cropland and pastureland
+cor.test(as.numeric(spr_df$bii[indexcrops]),as.numeric(spr_df$biomass[indexcrops]),method='pearson')# -0.25
+cor.test(as.numeric(spr_df$bii[indexpasture]),as.numeric(spr_df$biomass[indexpasture]),method='pearson') # -0.38
+
+# slightly positively correlated outside crops and pastures
+cor.test(as.numeric(spr_df$bii[-c(indexcrops,indexpasture)]),as.numeric(spr_df$biomass[-c(indexcrops,indexpasture)]),method='pearson') # 0.09
+
+# correlated in forest
+cor.test(as.numeric(spr_df$bii[indexforest]),as.numeric(spr_df$biomass[indexforest]),method='pearson') # 0.3
+
+# pretty much random outside forests (including anthropogenic)
+cor.test(as.numeric(spr_df$bii[-indexforest]),as.numeric(spr_df$biomass[-indexforest]),method='pearson') # -0.09
+
+# pretty much random in natural non-forest
+cor.test(as.numeric(spr_df$bii[-c(indexpasture,indexcrops,indexforest)]),as.numeric(spr_df$biomass[-c(indexpasture,indexcrops,indexforest)]),method='pearson') # 0.044
+
+
+# 
 
 #####################################################################
 #2 - Plotting of maps################################################
