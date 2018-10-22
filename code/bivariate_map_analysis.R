@@ -54,47 +54,57 @@ library(plyr)
 library(spatialEco)
 library(cowplot)
 library(viridis)
+library(snow)
+
+beginCluster(type="SOCK") 
 
 ###################################################################
 #1 - Processsing of spatial data###################################
 ###################################################################
 
-#load in ecoregion  dataset
-eco_regions <- readOGR(dsn = "data/ecoregions", layer = "Ecoregions2017")
 #load in coastline dataset
-coast<-readOGR("data/coastline/",layer="data/coastline/ne_10m_coastline.shp")
+coast<-readOGR(dsn="data/coastline/ne_10m_coastline.shp",layer="ne_10m_coastline")
 #fortify coastline shapefile for plotting in ggplot
 coast@data$id<-rownames(coast@data)
 coast.points<-fortify(coast,region="id")
 #load in BII map data
-BII_map<-raster("data/bii/lbii.asc.ovr")
+BII_map<-raster("data/bii/lbii.asc")
 #load in biomass map
 biomass<-raster("data/biomass_intactness/C_reduction_perc.tif")
-#load in human footprint index
-hfp<-raster("data/HumanFootprintv2/Dryadv3/Maps/HFP2009.tif")
 #load in nightlights, pasture, croplands, and human population density data
 pop<-raster("data/population_density/gpw_v4_population_density_rev10_2010_2pt5_min.tif")
 lights<-raster("data/lights/F182013.v4c_web.stable_lights.avg_vis.tif")
 pasture<-raster("data/agriculture/pasture.tif")
 croplands<-raster("data/agriculture/cropland.tif")
 
-#project crops and pastures
-croplandsll<- projectRaster(croplands, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",res=res(BII_map))
-pasturell<- projectRaster(pasture, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",res=res(BII_map))
-agriculturell<-croplandsll+pasturell
+#create a list for all the raster datasets
+raster_list<-as.list(biomass,pop,lights,pasture,croplands)
 
-plot(agriculturell)
 
+#project all data to mollweide equal area projection
+
+biomass_ex <- projectExtent(biomass, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
+biomass_proj <- projectRaster(biomass, biomass_ex)
+
+pop_ex <- projectExtent(pop, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
+pop_proj <- projectRaster(pop, pop_ex)
+
+light_ex <- projectExtent(lights, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
+lights_proj <- projectRaster(lights, lights_ex)
+
+pasture_ex <- projectExtent(pasture, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
+pasture_proj <- projectRaster(pasture, pasture_ex)
+
+croplands_ex <- projectExtent(croplands, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
+croplands_proj <- projectRaster(croplands, croplands_ex)
 
 # create forest map - no longer used
 r=raster(nrow=90*2,ncol=180*2)
 forestmap=rasterize(ESA[,1:2],r,field=ESA$share.FOREST)
 plot(forestmap)
 
-
 #aggregate the BII map to a coarser resolution and project
-plot(BII_map)
-BII_agg<-aggregate(BII_map, fact=10, fun=mean, expand=TRUE)
+BII_agg<-resample(BII_map,biomass)
 proj4string(BII_agg) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 BII_agg_corr<-BII_agg
 values(BII_agg_corr)[values(BII_agg_corr) >=1] = 1
@@ -102,30 +112,20 @@ values(BII_agg_corr)[values(BII_agg_corr) >=1] = 1
 writeRaster(BII_agg_corr, "data/BII_corrected", format = "GTiff")
 
 #clean up biomass data so that anything with values <0 and >1 get a a value of NA
-values(biomass)[values(biomass) <0] = NA
-values(biomass)[values(biomass) >=1] = NA
-#set biomass extent and projection to be the sames as that for the BII_agg map
-proj4string(biomass) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-biomass<-crop(biomass,BII_map)
+values(biomass_proj)[values(biomass_proj) <0] = NA
+values(biomass_proj)[values(biomass_proj) >=1] = NA
 #invert values for raster so that biomass raster represents the intactness of biomass rather than it's loss
-biomass_inv<-raster.invert(biomass)
+biomass_inv<-raster.invert(biomass_proj)
 #save this altered version of the biomass map
 writeRaster(biomass_inv, "data/biomass_intactness/biomass_corrected", format = "GTiff",overwrite=T)
 
-plot(biomass)
 
-#clean up hfp data and reproject
-hfp_coord<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
-projected_hfp<-projectRaster(hfp, crs = hfp_coord)
-projected_hfp_inv<-raster.invert(projected_hfp)
-
-#create a grid to extract data to with a resolution of 0.1 degrees - may need to change this to 0.083333 degrees
-r <- raster(extent(matrix( c(-180, -90, 180,  90), nrow=2)), nrow=1800, ncol=3600, 
-            crs = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")            
+#create a grid to extract data to with a resolution of 0.083333 degrees
+r <- raster(extent(matrix( c(-180, -90, 180,  90), nrow=2)), nrow=21169, ncol=4337,
+            crs = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 r[] <- 1:ncell(r)
 sp.r <- as(r, "SpatialPixelsDataFrame")
-
-
+r_crop<-crop(sp.r,coast)
 
 #extract values from biomass raster
 sp.r$biomass<-(extract(biomass_inv,sp.r))
