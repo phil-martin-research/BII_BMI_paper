@@ -44,6 +44,10 @@ col_func <- function(x, y, hue1 = 0.3, hue2 = 0.8, light_grey = 0, dark_grey = 1
 }
 
 #load packages to be used
+install.packages("raster","rgdal","ggplot2","maps","sp","colorplaner","cowplot","viridis","snow")
+install.
+
+
 library(raster)
 library(rgdal)
 library(ggplot2)
@@ -58,131 +62,28 @@ library(snow)
 
 beginCluster(type="SOCK") 
 
-###################################################################
-#1 - Processsing of spatial data###################################
-###################################################################
+
+ 
+
+#####################################################################
+#2 - Plotting of maps################################################
+#####################################################################
+
+spr_df<-read.csv("data/BII_BMI_data.csv")
+
+summary(spr_df)
 
 #load in coastline dataset
 coast<-readOGR(dsn="data/coastline/ne_10m_coastline.shp",layer="ne_10m_coastline")
 #fortify coastline shapefile for plotting in ggplot
 coast@data$id<-rownames(coast@data)
 coast.points<-fortify(coast,region="id")
-#load in BII map data
-BII_map<-raster("data/bii/lbii.asc")
-#load in biomass map
-biomass<-raster("data/biomass_intactness/C_reduction_perc.tif")
-#load in nightlights, pasture, croplands, and human population density data
-pop<-raster("data/population_density/gpw_v4_population_density_rev10_2010_2pt5_min.tif")
-lights<-raster("data/lights/F182013.v4c_web.stable_lights.avg_vis.tif")
-pasture<-raster("data/agriculture/pasture.tif")
-croplands<-raster("data/agriculture/cropland.tif")
-
-#create a list for all the raster datasets
-raster_list<-as.list(biomass,pop,lights,pasture,croplands)
-
-
-#project all data to mollweide equal area projection
-
-biomass_ex <- projectExtent(biomass, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
-biomass_proj <- projectRaster(biomass, biomass_ex)
-
-pop_ex <- projectExtent(pop, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
-pop_proj <- projectRaster(pop, pop_ex)
-
-light_ex <- projectExtent(lights, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
-lights_proj <- projectRaster(lights, lights_ex)
-
-pasture_ex <- projectExtent(pasture, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
-pasture_proj <- projectRaster(pasture, pasture_ex)
-
-croplands_ex <- projectExtent(croplands, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))
-croplands_proj <- projectRaster(croplands, croplands_ex)
-
-# create forest map - no longer used
-r=raster(nrow=90*2,ncol=180*2)
-forestmap=rasterize(ESA[,1:2],r,field=ESA$share.FOREST)
-plot(forestmap)
-
-#aggregate the BII map to a coarser resolution and project
-BII_agg<-resample(BII_map,biomass)
-proj4string(BII_agg) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-BII_agg_corr<-BII_agg
-values(BII_agg_corr)[values(BII_agg_corr) >=1] = 1
-#save this altered version of the BII map
-writeRaster(BII_agg_corr, "data/BII_corrected", format = "GTiff")
-
-#clean up biomass data so that anything with values <0 and >1 get a a value of NA
-values(biomass_proj)[values(biomass_proj) <0] = NA
-values(biomass_proj)[values(biomass_proj) >=1] = NA
-#invert values for raster so that biomass raster represents the intactness of biomass rather than it's loss
-biomass_inv<-raster.invert(biomass_proj)
-#save this altered version of the biomass map
-writeRaster(biomass_inv, "data/biomass_intactness/biomass_corrected", format = "GTiff",overwrite=T)
-
-
-#create a grid to extract data to with a resolution of 0.083333 degrees
-r <- raster(extent(matrix( c(-180, -90, 180,  90), nrow=2)), nrow=21169, ncol=4337,
-            crs = "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-r[] <- 1:ncell(r)
-sp.r <- as(r, "SpatialPixelsDataFrame")
-r_crop<-crop(sp.r,coast)
-
-#extract values from biomass raster
-sp.r$biomass<-(extract(biomass_inv,sp.r))
-#extract values from BII data
-sp.r$bii<-(extract(BII_agg_corr,sp.r))
-#extract hfp values to grid
-sp.r$hfp<-(extract(projected_hfp,sp.r))
-#extract croplands to grid
-sp.r$crops<-(extract(croplandsll_agg,sp.r))
-#extract pastures to grid
-sp.r$agriculture<-(extract(agriculture_agg,sp.r))
-# extract forest to grid
-sp.r$forest<-(extract(forestmap,sp.r))
-#convert grid to a dataframe for plotting in  ggplot
-spr_df<-as.data.frame(sp.r)
-#save this data as a csv file
-write.csv(spr_df,"data/BII_HF_BMI.csv")
 
 
 
-### STATS
-
-indexcrops=which(spr_df$crops>0)
-indexpasture=which(spr_df$pastures>0)
-indexforest=which(spr_df$forest>0.5)
-# overall anti-correlated
-cor.test(as.numeric(spr_df$bii),as.numeric(spr_df$biomass),method='pearson') #-0.16
-
-# more anti-correlated in cropland and pastureland
-cor.test(as.numeric(spr_df$bii[indexcrops]),as.numeric(spr_df$biomass[indexcrops]),method='pearson')# -0.25
-cor.test(as.numeric(spr_df$bii[indexpasture]),as.numeric(spr_df$biomass[indexpasture]),method='pearson') # -0.38
-
-# slightly positively correlated outside crops and pastures
-cor.test(as.numeric(spr_df$bii[-c(indexcrops,indexpasture)]),as.numeric(spr_df$biomass[-c(indexcrops,indexpasture)]),method='pearson') # 0.09
-
-# correlated in forest
-cor.test(as.numeric(spr_df$bii[indexforest]),as.numeric(spr_df$biomass[indexforest]),method='pearson') # 0.3
-
-# pretty much random outside forests (including anthropogenic)
-cor.test(as.numeric(spr_df$bii[-indexforest]),as.numeric(spr_df$biomass[-indexforest]),method='pearson') # -0.09
-
-# pretty much random in natural non-forest
-cor.test(as.numeric(spr_df$bii[-c(indexpasture,indexcrops,indexforest)]),as.numeric(spr_df$biomass[-c(indexpasture,indexcrops,indexforest)]),method='pearson') # 0.044
-
-
-# 
-
-#####################################################################
-#2 - Plotting of maps################################################
-#####################################################################
-
-spr_df<-read.csv("data/BII_HF_BMI.csv")
-
-spr_df$hf_inv_norm2<-(50-spr_df$hfp)/50
-
-#plot bivariate map of biomass intactness vs biodivesity intactness
+#plot bivariate map of biomass intactness vs biodiversity intactness
 #alter function 'col_func' to change the tones used in the map
+
 biv_map1<-ggplot()
 biv_map2<-biv_map1+geom_raster(data=spr_df,aes(x=x,y=y,fill=biomass,fill2=bii))+
          scale_fill_colourplane(name = "",na.color = "NA",color_projection = col_func,

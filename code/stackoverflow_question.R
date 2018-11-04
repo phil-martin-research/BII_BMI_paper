@@ -4,7 +4,12 @@
 library(raster)
 library(colorplaner)
 library(ggplot2)
+install.packages("digest")
 
+
+install.packages("colorplaner")
+# Current development version: 
+devtools::install_github("wmurphyrd/colorplaner")
 
 #here's my dummy data
 r1<- raster(ncol=10, nrow=10)
@@ -29,9 +34,11 @@ grid.df<-as.data.frame(grid.pdf)
 
 #plot a map  of this
 
-ggplot(data=grid.df,aes(x,y,fill=r1,fill2=r2))+geom_raster()+scale_fill_colourplane("")
+ggplot(data=grid.df,aes(x,y,fill=r1,fill2=r2))+geom_raster()+scale_fill_colourplane()
 ggsave("figures/bivariate_eg2.png",width = 6,height = 4,dpi = 200,units = "in")
 
+
+?colorplaner
 #This colourscale doesn't really suit my needs - give example of colour scheme that I'd like
 
 #however I'm finding it tricky to modify the colourscheme in the function scale_fill_colourplane

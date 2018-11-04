@@ -157,3 +157,6 @@ pop_bmi_plot2<-pop_bmi_plot1+ylab("biodiversity intactness index")+xlab("Human p
 pop_bmi_plot3<-pop_bmi_plot2+theme(legend.position="none")+geom_line(data=bmi_pop_preds,aes(x=pop_den,y=preds,colour=forest),size=1)+scale_x_continuous(trans="log",labels=comma,breaks=c(0.1,1,10,100,1000))+scale_color_manual("",values=c("Forest"="green4","Non-forest"="dark grey"))
 save_plot(pop_bmi_plot3,filename = "figures/pop_bmi_scatter.png",base_aspect_ratio = 1.2,dpi=600)
 
+M1<-glm(biomass~log(pop_den+1)+log(light+1)+pasture+croplands,family = 'binomial',data = hotspot_overlap_df)
+summary(M1)
+std.coef(M1,partial.sd=T)
