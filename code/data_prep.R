@@ -1,8 +1,6 @@
 #this script is for data formatting and extraction from raster layers
 
 rm(list = ls())
-gc()
-
 
 #load packages to be used
 library(raster)
@@ -19,16 +17,9 @@ library(snow)
 
 beginCluster(n=4,type="SOCK") 
 
-
 ###################################################################
 #1 - Processsing of spatial data###################################
 ###################################################################
-
-
-##################################################################
-#change to put all data in the same folder to allow quick import##
-##################################################################
-
 
 #load in BII map data
 BII_map<-raster("data/bii/lbii.asc")
@@ -121,29 +112,4 @@ spr_df<-as.data.frame(sp.r)
 #save this data as a csv file
 write.csv(spr_df,"data/BII_BMI_data.csv")
 
-### STATS
 
-indexcrops=which(spr_df$crops>0)
-indexpasture=which(spr_df$pastures>0)
-indexforest=which(spr_df$forest>0.5)
-# overall anti-correlated
-cor.test(as.numeric(spr_df$bii),as.numeric(spr_df$biomass),method='pearson') #-0.16
-
-# more anti-correlated in cropland and pastureland
-cor.test(as.numeric(spr_df$bii[indexcrops]),as.numeric(spr_df$biomass[indexcrops]),method='pearson')# -0.25
-cor.test(as.numeric(spr_df$bii[indexpasture]),as.numeric(spr_df$biomass[indexpasture]),method='pearson') # -0.38
-
-# slightly positively correlated outside crops and pastures
-cor.test(as.numeric(spr_df$bii[-c(indexcrops,indexpasture)]),as.numeric(spr_df$biomass[-c(indexcrops,indexpasture)]),method='pearson') # 0.09
-
-# correlated in forest
-cor.test(as.numeric(spr_df$bii[indexforest]),as.numeric(spr_df$biomass[indexforest]),method='pearson') # 0.3
-
-# pretty much random outside forests (including anthropogenic)
-cor.test(as.numeric(spr_df$bii[-indexforest]),as.numeric(spr_df$biomass[-indexforest]),method='pearson') # -0.09
-
-# pretty much random in natural non-forest
-cor.test(as.numeric(spr_df$bii[-c(indexpasture,indexcrops,indexforest)]),as.numeric(spr_df$biomass[-c(indexpasture,indexcrops,indexforest)]),method='pearson') # 0.044
-
-
-# 

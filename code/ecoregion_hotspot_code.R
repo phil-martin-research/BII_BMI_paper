@@ -37,20 +37,6 @@ proj4string(BII_agg) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +t
 #extract information on BII values in each ecoregion
 bii_ecoregions<-extract(BII_agg,eco_regions,fun=mean,na.rm=TRUE)
 
-#load in gridded population data
-pop_dens<-raster("data/population_density/gpw_v4_population_density_rev10_2010_2pt5_min.tif")
-plot(pop_dens)
-
-#extact population values in each ecoreion
-pop_ecoregions<-extract(pop_dens,eco_regions,fun=mean,na.rm=TRUE)
-
-#load in agriculture data
-pasture<-raster("data/agriculture/pasture.tif")
-cropland<-raster("data/agriculture/cropland.tif")
-pasture_ecoregions<-extract(pasture,eco_regions,fun=mean,na.rm=TRUE)
-cropland_ecoregions<-extract(cropland,eco_regions,fun=mean,na.rm=TRUE)
-
-
 
 
 hotspot_overlap_df<-read.csv("data/hotspot_overlap.csv")
