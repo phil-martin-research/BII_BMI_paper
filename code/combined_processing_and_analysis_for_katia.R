@@ -71,9 +71,9 @@ beginCluster(n=6,type="SOCK")
 #1 - Processsing of spatial data###################################
 ###################################################################
 
-BII_map<-raster("data/bii/lbii.asc")#load in BII map data
-biomass<-raster("data/biomass_intactness/C_reduction_perc.tif")#load in biomass map
-hfp<-raster("data/HumanFootprintv2/Dryadv3/Maps/HFP2009.tif")
+BII_map<-raster("data/lbii.asc")#load in BII map data
+biomass<-raster("data/C_reduction_perc.tif")#load in biomass map
+hfp<-raster("data/HFP2009.tif")
 
 
 #project all data to mollweide equal area projection#
@@ -84,13 +84,13 @@ values(biomass_proj)[values(biomass_proj) >=1] = NA
 biomass_inv<-raster.invert(biomass_proj)#invert values for raster to represent intactness
 
 writeRaster(biomass_inv, #save this altered version of the biomass map
-            "data/biomass_intactness/biomass_corrected_moll", 
+            "data/biomass_corrected_moll", 
             format = "GTiff",overwrite=T)
 
 BII_agg<-resample(BII_map,biomass)#aggregate the BII map to a coarser resolution
 BII_ex <- projectExtent(BII_agg, CRS("+proj=moll +lon_0=0 +ellps=WGS84")) #project BII data
 BII_proj <- projectRaster(BII_agg, BII_ex)
-writeRaster(BII_proj, "data/BII_moll", format = "GTiff")#save projeted BII
+writeRaster(BII_proj, "data/BII_moll", format = "GTiff")#save projected BII
 BII_proj_capped<-BII_proj
 values(BII_proj_capped)[values(BII_proj_capped) >=1] = 1#set maximum BII value as 1
 writeRaster(BII_proj_capped, "data/BII_corrected", format = "GTiff",overwrite=T) #save BII map with max value of 1
@@ -103,11 +103,9 @@ sp.r <- as(r, "SpatialPixelsDataFrame")
 
 sp.r$biomass<-(extract(biomass_inv,sp.r))#extract values from biomass raster
 sp.r$bii<-(extract(BII_proj,sp.r))#extract values from BII data
-sp.r$hf<-(extract(hfp,sp.r))#extract values from hf data
 spr_df<-as.data.frame(sp.r)#convert grid to a dataframe for plotting in  ggplot
-write.csv(spr_df,"data/BII_BMI_data.csv")#save this data as a csv file
+write.csv(spr_df,"data/output_data//BII_BMI_data.csv")#save this data as a csv file
 head(spr_df)
-
 
 ########################################################################
 #2- calculate the mean bii, biomass, and human footprint of############
@@ -116,10 +114,10 @@ head(spr_df)
 ########################################################################
 
 #load ecoregion, hotspot, and coast shapefiles
-eco_regions <- shapefile("data/ecoregions/Ecoregions2017.shp")#load in ecoregion  dataset
-hotspots <- shapefile("data/hotspots/hotspots_revisited_2004_polygons.shp")#load in hotspots dataset
+eco_regions <-shapefile("data/Ecoregions2017.shp")#load in ecoregion  dataset
+hotspots<-shapefile("data/hotspots_revisited_2004_polygons.shp")#load in hotspots dataset
 
-hotspots <- hotspots[hotspots$TYPE=="hotspot_area",]#subset hotspot data to only include polygons of extent
+hotspots<-hotspots[hotspots$TYPE=="hotspot_area",]#subset hotspot data to only include polygons of hotspot extent
 
 #work out area of hotspot that overlaps with ecoregions
 ecoregions_unique<-eco_regions@data$ECO_NAME#produce list of unique hotspot names
@@ -138,35 +136,33 @@ for (i in 1:length(ecoregions_unique)){
   },error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
 }
 
-#extract mean raster values for each ecoregion#
-bii_ecoregions<-extract(BII_proj,eco_regions,fun=mean,na.rm=TRUE)#extract mean BII for each ecoregion
-biomass_ecoregions<-extract(biomass_corr,eco_regions,fun=mean,na.rm=TRUE)#extract mean biomass for each ecoregion
-hf_ecoregions<-extract(hfp,eco_regions,fun=mean,na.rm=TRUE) #extract mean human footprint for each ecoregion
 
-write.csv(ecoregion_overlap,file="data/ecoregion_overlap.csv")
 
 #attach this data to the ecoregion shapefile data
 eco_regions2<-merge(eco_regions,ecoregion_overlap,by="ECO_NAME",all=T)
 
 #remove nas
 eco_regions2@data$hotspot_area2<-ifelse(is.na(eco_regions2@data$hotspot_area),0,eco_regions2@data$hotspot_area)
+
+
+#extract mean raster values for each ecoregion
+bii_ecoregions<-extract(BII_proj,eco_regions,fun=mean,na.rm=TRUE)#extract mean BII for each ecoregion
+biomass_ecoregions<-extract(biomass_inv,eco_regions,fun=mean,na.rm=TRUE)#extract mean biomass for each ecoregion
+hf_ecoregions<-extract(hfp,eco_regions,fun=mean,na.rm=TRUE) #extract mean human footprint for each ecoregion
+
 #put all this in a dataframe
-hotspot_overlap_df<-data.frame(ECO_NAME=eco_regions2@data$ECO_NAME,hotspot_area=eco_regions2@data$hotspot_area2,bii=bii_ecoregions,biomass=biomass_ecoregions,hf=hf_ecoregions)
-hotspot_overlap_df$hotspot<-ifelse(hotspot_overlap_df$hotspot_area>=50,"hotspot","not hotspot")
-#save dataframe to csv
-write.csv(hotspot_overlap_df,"data/hotspot_overlap.csv")
-
-hotspot_stats<-data.frame(hotspot_name=hotspots@data$NAME,biomass=hotspot_biomass,bii=hotspot_bii,bii_unc=hotspot_bii_unc)
-ggplot(hotspot_stats,aes(x=hotspot_bii,y=hotspot_bii_unc))+geom_point()+geom_abline(lty=2)
-write.csv(hotspot_stats,"data/hotspot_stats.csv")
-
+ecoregion_hotspot_stats<-data.frame(ECO_NAME=eco_regions2@data$ECO_NAME,hotspot_area=eco_regions2@data$hotspot_area2,bii=bii_ecoregions,biomass=biomass_ecoregions,hf=hf_ecoregions)
+ecoregion_hotspot_stats$hotspot<-ifelse(ecoregion_hotspot_stats$hotspot_area>=50,"hotspot","not hotspot")
+write.csv(ecoregion_hotspot_stats,"data/output_data/ecoregion_hotspot_stats.csv")
 
 #####################################################################
 #3 - Plotting of final figure########################################
 #####################################################################
 
-spr_df<-read.csv("data/analysis_output/BII_HF_BMI.csv") #read in data extracted to grid
+spr_df<-read.csv("data/output_data/BII_BMI_data.csv")#read in data extracted to grid
 summary(spr_df)#summary of data extracted to grid
+mean(spr_df$bii,na.rm=T)
+
 spr_df_cc<-spr_df[complete.cases(spr_df), ]#remove rows with missing data
 
 
@@ -190,10 +186,10 @@ biv_map2<-biv_map1+geom_raster(data=spr_df,aes(x=x,y=y,fill=biomass,fill2=bii))+
          guides(fill = guide_colorplane(title.theme = element_text(size = 13),label.theme = theme_gray(),label.y.theme = theme_gray()))+
          theme(legend.position=c(.1,.3),panel.background = element_blank(),axis.text = element_blank(),axis.ticks = element_blank(),legend.key.size=unit(0.8,"cm"))
 biv_map3<-biv_map2+geom_path(data=coast.points,aes(x = long, y = lat, group = group),colour="black",size=0.1)
-ggsave("figures/bivariate_map_new_scale_final_test.png",height = 10,width=14,dpi = 800,units = "in")
 
 
 hotspot_overlap_df<-read.csv("data/hotspot_overlap.csv")#load ecoregion statistics
+
 
 #calculate median and quartiles for BII and BMI for ecoregions with >50% overlap with hotspots
 #and ecoregions with <50% overlap with hotspots
