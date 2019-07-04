@@ -114,7 +114,11 @@ values(BII_proj_capped)[values(BII_proj_capped) >=1] = 1#set maximum BII value a
 writeRaster(BII_proj_capped, "data/BII_capped", format = "GTiff",overwrite=T) #save BII map with max value of 1
 
 #create a grid to extract data to with a resolution of 0.083333 degrees
-r <- raster(extent(biomass), nrow=2169, ncol=4337,
+extent(BII_proj_capped)
+(18039857*2)/10000
+(9020048*2)/10000
+
+r <- raster(extent(biomass), nrow=1804, ncol=3607,
             crs = "+proj=moll +lon_0=0 +ellps=WGS84 +units=m +no_defs")
 r[] <- 1:ncell(r)
 sp.r <- as(r, "SpatialPixelsDataFrame")
@@ -195,8 +199,8 @@ coast_df<-SpatialLinesDataFrame(coast_simp,coast@data)
 #plot bivariate map of biomass intactness vs biodiversity intactness
 #alter function 'col_func' to change the tones used in the map
 biv_map1<-ggplot()
-biv_map2<-biv_map1+geom_tile(data=spr_df,aes(x=x,y=y,fill=biomass,fill2=bii))+
-         scale_fill_colourplane(name = "",na.color = "NA",color_projection = col_func,
+biv_map2<-biv_map1+geom_point(data=spr_df,aes(x=x,y=y,color=biomass,color2=bii),shape="square",size=1)+
+         scale_colour_colourplane(name = "",na.color = "NA",color_projection = col_func,
          limits_y = c(0,1),limits=c(0,1),axis_title = "biomass \nintactness",
          axis_title_y = "Biodiversity\n Intactness \nIndex",breaks = c(0,0.5,1),breaks_y = c(0,0.5,1),
          hue1 = 1, hue2 = 0.62,
