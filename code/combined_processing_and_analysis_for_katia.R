@@ -4,11 +4,11 @@
 #to the human footprint index########################################################
 #####################################################################################
 
-
-rm(list = ls())
 .libPaths("C:/R/Library")
 .Library<-"C:/R/Library"
 
+
+rm(list = ls())
 
 #use this function to produce a hsv bivariate palette for the map
 #set hue as 0.16 and 0.62 for yellow to blue pallete
@@ -64,6 +64,11 @@ library(cowplot)
 library(viridis)
 library(snow)
 library(rgeos)
+library(devtools)
+library(archive)
+library(rdryad)
+library(dplyr)
+library(stringr)
 
 
 beginCluster(n=6,type="SOCK") 
@@ -72,7 +77,7 @@ beginCluster(n=6,type="SOCK")
 #1 - Processsing of spatial data###################################
 ###################################################################
 
-BII_map<-raster("data/lbii.asc")#load in BII map data
+BII_map<-raster("data/lbii.asc")#load in BII map data downloaded from https://doi.org/10.5519/0009936
 
 #download biomass data from Erb et al 2017 https://doi.org/10.1038/nature25138
 download.file("https://boku.ac.at/fileadmin/data/H03000/H73000/H73700/Data_Download/Data/NatureDataDownload.zip", 
@@ -86,12 +91,17 @@ unlink("data/NEW/",recursive = TRUE)#remove biomass folder with unwanted files
 file.remove("data/NATURE_DATADOWNLOAD.zip")#remove biomass zips with unwanted files
 file.remove("data/NatureDataDownload.zip")#remove biomass zips with unwanted files
 biomass<-raster("data/C_reduction_perc.tif")#load in biomass map
-
+getwd()
 #download human footprint data from Venter et al 2015 https://doi.org/10.1038/sdata.2016.67 (data location http://dx.doi.org/10.5061/dryad.052q5)
-download.file("https://datadryad.org/bitstream/handle/10255/dryad.131447/HumanFootprintv2.7z?sequence=2", 
-              destfile = 'data/HumanFootprintv2.7z')
-
-hfp<-raster("data/HFP2009.tif")
+tf <- tempfile()
+td <- tempdir()
+file.path <-"https://datadryad.org/bitstream/handle/10255/dryad.131447/HumanFootprintv2.7z?sequence=2"
+download.file( file.path , tf , mode = "wb" )
+hfp_files<-a%>% 
+  select(path, size,date) %>% 
+  filter(str_detect(string=tolower(path), pattern = "hfp2009.tif"))
+hfp_files
+hfp<-raster(hfp_files[1,]) # need to fix here
 
 
 #project all data to mollweide equal area projection#
@@ -114,12 +124,8 @@ values(BII_proj_capped)[values(BII_proj_capped) >=1] = 1#set maximum BII value a
 writeRaster(BII_proj_capped, "data/BII_capped", format = "GTiff",overwrite=T) #save BII map with max value of 1
 
 #create a grid to extract data to with a resolution of 0.083333 degrees
-extent(BII_proj_capped)
-(18039857*2)/10000
-(9020048*2)/10000
-
-r <- raster(extent(biomass), nrow=1804, ncol=3607,
-            crs = "+proj=moll +lon_0=0 +ellps=WGS84 +units=m +no_defs")
+r <- raster(extent(BII_proj_capped), nrow=1804, ncol=3607,
+            crs = "+proj=moll +lon_0=0 +ellps=WGS84")
 r[] <- 1:ncell(r)
 sp.r <- as(r, "SpatialPixelsDataFrame")
 
@@ -127,8 +133,9 @@ sp.r <- as(r, "SpatialPixelsDataFrame")
 sp.r$biomass<-(extract(biomass_inv,sp.r))#extract values from biomass raster
 sp.r$bii<-(extract(BII_proj_capped,sp.r))#extract values from BII data
 spr_df<-as.data.frame(sp.r)#convert grid to a dataframe for plotting in  ggplot
+
 write.csv(spr_df,"data/output_data//BII_BMI_data.csv")#save this data as a csv file
-head(spr_df)
+summary(spr_df)
 
 ########################################################################
 #2- calculate the mean bii, biomass, and human footprint of############
@@ -192,28 +199,29 @@ unzip(zipfile = "coastlines.zip",#unzip coastline dataset
       exdir = 'data')
 coast<-readOGR("data/ne_10m_coastline.shp")
 coast_moll<- spTransform(coast, crs(biomass_inv))
-coast_simp<-gSimplify(coast,tol = 0.1,topologyPreserve = TRUE)#simplify coastline to speed up plotting
-
+coast_simp<-gSimplify(coast_moll,tol = 0.1,topologyPreserve = TRUE)#simplify coastline to speed up plotting
 coast_df<-SpatialLinesDataFrame(coast_simp,coast@data) 
+
 
 #plot bivariate map of biomass intactness vs biodiversity intactness
 #alter function 'col_func' to change the tones used in the map
 biv_map1<-ggplot()
-biv_map2<-biv_map1+geom_point(data=spr_df,aes(x=x,y=y,color=biomass,color2=bii),shape="square",size=1)+
-         scale_colour_colourplane(name = "",na.color = "NA",color_projection = col_func,
+biv_map2<-biv_map1+geom_raster(data=spr_df,aes(x=x,y=y,fill=biomass,fill2=bii))+
+         scale_fill_colourplane(name = "",na.color = "NA",color_projection = col_func,
          limits_y = c(0,1),limits=c(0,1),axis_title = "biomass \nintactness",
          axis_title_y = "Biodiversity\n Intactness \nIndex",breaks = c(0,0.5,1),breaks_y = c(0,0.5,1),
          hue1 = 1, hue2 = 0.62,
          dark_grey = 0.5,
          light_grey = 0.9)+
-         theme_bw()+coord_equal()+
+         theme_bw()+coord_equal(ylim = c(-6500000,8500000))+
          guides(fill = guide_colorplane(title.theme = element_text(size = 13),label.theme = theme_gray(),
          label.y.theme = theme_gray(),axis.ticks = element_blank()))+
          theme(axis.line=element_blank(),panel.background=element_blank(),panel.border=element_blank(),
          panel.grid.major=element_blank(),panel.grid.minor=element_blank(),plot.background=element_blank(),
-         axis.ticks = element_blank(),axis.text = element_blank(),axis.title = element_blank(),
+         axis.ticks = element_blank(),
          legend.position=c(.1,.3),legend.key.size=unit(0.8,"cm"))
-biv_map2
+biv_map3<-biv_map2+geom_path(data=coast_df,aes(x = long, y = lat, group = group),colour="black",size=0.1)
+biv_map3
 
 
 hotspot_overlap_df<-read.csv("data/output_data/ecoregion_hotspot_stats.csv")#load ecoregion statistics
@@ -257,5 +265,7 @@ hf_bmi_plot2<-hf_bmi_plot1+scale_color_manual("",values=c("hotspot"="red","not h
 hf_bmi_plot3<-hf_bmi_plot2+theme(legend.position="none")
 
 bottom_row<-plot_grid(hf_bmi_plot3,hf_bii_plot3,hs_BMI_BII_4,labels=c("b","c","d"),align='h',ncol=3)
-combined_plots<-plot_grid(biv_map2,bottom_row,labels=c('a',''),ncol=1,rel_heights=c(1.6,1))
-save_plot(combined_plots,filename = "figures/combined_plot_new.png",base_aspect_ratio = 1.2,dpi=600,base_height = 10,base_width = 12)
+combined_plots<-plot_grid(biv_map3,bottom_row,labels=c('a',''),ncol=1,rel_heights=c(1.6,1))
+save_plot(combined_plots,filename = "figures/combined_plot_new.png",base_aspect_ratio = 1.2,dpi=300,base_height = 10,base_width = 12)
+#this plot was then modified in GIMP to change contrast for the map and remove axis 
+#labels that I couldn't remove programatically
