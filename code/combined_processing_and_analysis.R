@@ -91,21 +91,18 @@ unlink("data/NEW/",recursive = TRUE)#remove biomass folder with unwanted files
 file.remove("data/NATURE_DATADOWNLOAD.zip")#remove biomass zips with unwanted files
 file.remove("data/NatureDataDownload.zip")#remove biomass zips with unwanted files
 biomass<-raster("data/C_reduction_perc.tif")#load in biomass map
-getwd()
+
 #download human footprint data from Venter et al 2015 https://doi.org/10.1038/sdata.2016.67 (data location http://dx.doi.org/10.5061/dryad.052q5)
 tf <- tempfile()
 td <- tempdir()
 file.path <-"https://datadryad.org/bitstream/handle/10255/dryad.131447/HumanFootprintv2.7z?sequence=2"
 download.file( file.path , tf , mode = "wb" )
-hfp_files<-a%>% 
-  select(path, size,date) %>% 
-  filter(str_detect(string=tolower(path), pattern = "hfp2009.tif"))
-hfp_files
-hfp<-raster(hfp_files[1,]) # need to fix here
+hfp_zip<-archive(tf)
+hfp_extracted<-archive_extract(hfp_zip,"data/HFP")
+hfp<-raster("data/HFP/Dryadv3/Maps/HFP2009.tif")
 
-
-#project all data to mollweide equal area projection#
-biomass_ex <- projectExtent(biomass, CRS("+proj=moll +lon_0=0 +ellps=WGS84"))#vegetation biomass
+#project all data to mollweide equal area projection - the same as used by HFP data
+biomass_ex <- projectExtent(biomass, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"))#vegetation biomass
 biomass_proj <- projectRaster(biomass, biomass_ex)
 values(biomass_proj)[values(biomass_proj) <0] = NA #set biomass values <0 and >1 to NA
 values(biomass_proj)[values(biomass_proj) >=1] = NA
@@ -116,7 +113,7 @@ writeRaster(biomass_inv, #save this altered version of the biomass map
             format = "GTiff",overwrite=T)
 
 BII_agg<-resample(BII_map,biomass)#aggregate the BII map to a coarser resolution
-BII_ex <- projectExtent(BII_agg, CRS("+proj=moll +lon_0=0 +ellps=WGS84")) #project BII data
+BII_ex <- projectExtent(BII_agg, CRS("+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs")) #project BII data
 BII_proj <- projectRaster(BII_agg, BII_ex)
 writeRaster(BII_proj, "data/BII_moll", format = "GTiff")#save projected BII
 BII_proj_capped<-BII_proj
@@ -135,7 +132,6 @@ sp.r$bii<-(extract(BII_proj_capped,sp.r))#extract values from BII data
 spr_df<-as.data.frame(sp.r)#convert grid to a dataframe for plotting in  ggplot
 
 write.csv(spr_df,"data/output_data//BII_BMI_data.csv")#save this data as a csv file
-summary(spr_df)
 
 ########################################################################
 #2- calculate the mean bii, biomass, and human footprint of############
